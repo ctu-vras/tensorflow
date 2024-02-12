@@ -14,6 +14,8 @@ limitations under the License.
 ==============================================================================*/
 #include "tensorflow/lite/tools/optimize/quantize_model.h"
 
+#include <stdbool.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <limits>
@@ -26,6 +28,7 @@ limitations under the License.
 
 #include "flatbuffers/flexbuffers.h"
 #include "absl/strings/str_cat.h"
+#include "third_party/live555/UsageEnvironment/include/Boolean.h"
 #include "tensorflow/compiler/mlir/lite/tools/optimize/operator_property.h"
 #include "tensorflow/lite/context.h"
 #include "tensorflow/lite/core/api/error_reporter.h"
@@ -569,6 +572,7 @@ int32_t SetOutputType(ModelT* model, SubGraphT* subgraph,
 TfLiteStatus SetInputAndOutputTypes(ModelT* model, const TensorType& input_type,
                                     const TensorType& output_type,
                                     const TensorType& activations_type,
+                                    bool handle_external_state,
                                     ErrorReporter* error_reporter) {
   for (int subgraph_idx = 0; subgraph_idx < model->subgraphs.size();
        subgraph_idx++) {
@@ -591,8 +595,13 @@ TfLiteStatus SetInputAndOutputTypes(ModelT* model, const TensorType& input_type,
             EnumNameTensorType(tensor->type));
         return kTfLiteError;
       }
+      // Keeps the state input tensors in their original type(same as activation
+      // type). But changes the input type of input data/features.
       const int32_t input_idx = SetInputType(
-          model, subgraph, subgraph->inputs[i], input_type, activations_type);
+          model, subgraph, subgraph->inputs[i],
+          ((i > 0 && handle_external_state) ? activations_type : input_type),
+          activations_type);
+
       if (input_idx < 0) {
         continue;
       }
@@ -617,8 +626,12 @@ TfLiteStatus SetInputAndOutputTypes(ModelT* model, const TensorType& input_type,
             EnumNameTensorType(tensor->type));
         return kTfLiteError;
       }
+      // Keeps the state output tensors in their original type. Avoids extra OP.
       const int32_t output_idx = SetOutputType(
-          model, subgraph, subgraph->outputs[i], output_type, activations_type);
+          model, subgraph, subgraph->outputs[i],
+          ((i > 0 && handle_external_state) ? activations_type : output_type),
+          activations_type);
+
       if (output_idx < 0) {
         continue;
       }
@@ -1932,7 +1945,8 @@ TfLiteStatus QuantizeModel(flatbuffers::FlatBufferBuilder* builder,
                            const TensorType& activations_type,
                            const TensorType& bias_type,
                            bool disable_per_channel,
-                           ErrorReporter* error_reporter) {
+                           ErrorReporter* error_reporter,
+                           bool handle_external_state = False) {
   auto real_value_op_set =
       PopulateRealValueOpSet(model, operator_names, activations_type);
   TF_LITE_ENSURE_STATUS(DuplicateBiasesWithMultipleUses(model, error_reporter));
@@ -1958,8 +1972,9 @@ TfLiteStatus QuantizeModel(flatbuffers::FlatBufferBuilder* builder,
                                        activations_type, bias_type,
                                        disable_per_channel, error_reporter));
   utils::SetOperatorCodeVersion(model);
-  TF_LITE_ENSURE_STATUS(SetInputAndOutputTypes(
-      model, input_type, output_type, activations_type, error_reporter));
+  TF_LITE_ENSURE_STATUS(
+      SetInputAndOutputTypes(model, input_type, output_type, activations_type,
+                             handle_external_state, error_reporter));
   SetOperatorPropertyADDSUBOperator(model, activations_type);
   flatbuffers::Offset<Model> output_model_location =
       Model::Pack(*builder, model);
@@ -2024,6 +2039,20 @@ TfLiteStatus QuantizeModel(flatbuffers::FlatBufferBuilder* builder,
                        /*bias_type=*/TensorType_INT32,
                        /*disable_per_channel=*/disable_per_channel,
                        error_reporter);
+}
+
+TfLiteStatus QuantizeModel(flatbuffers::FlatBufferBuilder* builder,
+                           ModelT* model, const TensorType& input_type,
+                           const TensorType& output_type, bool allow_float,
+                           bool disable_per_channel,
+                           ErrorReporter* error_reporter,
+                           bool handle_external_state) {
+  return QuantizeModel(builder, model, input_type, output_type, allow_float,
+                       GetAllOperatorOutputs(model),
+                       /*activations_type=*/TensorType_INT8,
+                       /*bias_type=*/TensorType_INT32,
+                       /*disable_per_channel=*/disable_per_channel,
+                       error_reporter, handle_external_state);
 }
 
 TfLiteStatus QuantizeModel(flatbuffers::FlatBufferBuilder* builder,
