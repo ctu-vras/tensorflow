@@ -2037,6 +2037,10 @@ HloCallableInstruction::CloneAndAppendInstructionIntoCalledComputation(
       // Clone's operand was not already an operand of the callable
       // instruction. Add it as an operand and add a corresponding called
       // computation parameter instruction.
+
+      // We do not create an original_value for the added parameter as it does
+      // not correspond to any value in the input HLO graph. The original
+      // value in this case is saved in the corresponding argument.
       called_computation_parameter = AddCallOperand(operand);
     }
     TF_CHECK_OK(
@@ -2044,6 +2048,10 @@ HloCallableInstruction::CloneAndAppendInstructionIntoCalledComputation(
   }
 
   if (clone != instruction_to_append) {
+    // Copy over original_value attribute to the clone of a fused instruction.
+    if (auto original_value = instruction_to_append->original_value()) {
+      clone->set_original_value(original_value);
+    }
     VLOG(2) << "New clone:\n" << clone->ToString();
   }
 
@@ -2084,6 +2092,19 @@ HloCallableInstruction::CloneAndAppendInstructionIntoCalledComputation(
     }
     HloInstruction* new_root = called_computation()->AddInstruction(
         HloInstruction::CreateTuple(tuple_elements));
+
+    // Add original_value to new roots.
+    if (root->original_value()) {
+      auto original_value = std::make_shared<OriginalValue>(new_root->shape());
+      for (int64_t operand_number = 0;
+           operand_number < new_root->operand_count(); ++operand_number) {
+        original_value->CopySubtreeFrom(
+            *new_root->operand(operand_number)->original_value(), {},
+            {operand_number});
+        new_root->set_original_value(original_value);
+      }
+    }
+
     called_computation()->set_root_instruction(new_root,
                                                /*accept_different_shape=*/true);
     *mutable_shape() = new_root->shape();
