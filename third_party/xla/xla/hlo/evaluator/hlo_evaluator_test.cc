@@ -30,6 +30,7 @@ limitations under the License.
 #include "absl/base/internal/endian.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_format.h"
@@ -852,6 +853,34 @@ TEST_P(HloEvaluatorBf16Test, NegativeAndInteriorPadding2D) {
 
   auto expected_array = std::make_unique<Array2D<float>>(0, 9);
   auto expected = LiteralUtil::CreateR2FromArray2D<float>(*expected_array);
+
+  EXPECT_TRUE(LiteralTestUtil::Equal(expected, result));
+}
+
+TEST_F(HloEvaluatorTest, Pad2DFloatArrayDifferentTypes) {
+  auto operand = LiteralUtil::CreateR2<bfloat16>({{}, {}});
+  HloComputation::Builder b(TestName());
+  auto operand_instruction =
+      b.AddInstruction(HloInstruction::CreateConstant(std::move(operand)));
+
+  auto pad_value = LiteralUtil::CreateR0<float>(10.0f);
+  auto padding_value_instruction =
+      b.AddInstruction(HloInstruction::CreateConstant(std::move(pad_value)));
+
+  auto padding_config = CreatePaddingConfig({{{1, 0, 2}}, {{0, 2, 1}}});
+  Shape shape = ShapeUtil::MakeShape(BF16, {5, 2});
+  b.AddInstruction(HloInstruction::CreatePad(
+      shape, operand_instruction, padding_value_instruction, padding_config));
+  m_->AddEntryComputation(b.Build());
+  std::cout << "module: " << m_->ToString();
+  TF_ASSERT_OK_AND_ASSIGN(Literal result, Evaluate());
+
+  bfloat16 bf16_c(10.0f);
+  auto expected = LiteralUtil::CreateR2<bfloat16>({{bf16_c, bf16_c},
+                                                   {bf16_c, bf16_c},
+                                                   {bf16_c, bf16_c},
+                                                   {bf16_c, bf16_c},
+                                                   {bf16_c, bf16_c}});
 
   EXPECT_TRUE(LiteralTestUtil::Equal(expected, result));
 }
@@ -3358,6 +3387,27 @@ TEST_P(HloEvaluatorBf16Test, EvaluateWithSubstitutionsWithConstantOperand) {
       LiteralUtil::CreateR1<float>({11, 22, 33, 44}), result));
 }
 
+TEST_F(HloEvaluatorTest, EvaluateWithSubstitutionsLiteralBase) {
+  HloComputation::Builder b(TestName());
+  Shape shape = ShapeUtil::MakeShape(S64, {3});
+
+  HloInstruction* param0 =
+      b.AddInstruction(HloInstruction::CreateParameter(0, shape, "param0"));
+  HloInstruction* square = b.AddInstruction(HloInstruction::CreateBinary(
+      shape, HloOpcode::kMultiply, param0, param0));
+
+  std::vector<int64_t> int64_values = {1, 2, 3};
+  const Shape literal_shape = ShapeUtil::MakeShape(S64, {3});
+
+  BorrowingLiteral literal(reinterpret_cast<const char*>(int64_values.data()),
+                           literal_shape);
+  HloEvaluator evaluator;
+  TF_ASSERT_OK_AND_ASSIGN(Literal result, evaluator.EvaluateWithSubstitutions(
+                                              square, {{param0, &literal}}));
+  EXPECT_TRUE(LiteralTestUtil::Equal(LiteralUtil::CreateR1<int64_t>({1, 4, 9}),
+                                     result));
+}
+
 TEST_F(HloEvaluatorTest, EvaluateGather_TensorFlowGatherV1) {
   const char* hlo_text = R"(
 HloModule TensorFlowGatherV1
@@ -4695,6 +4745,22 @@ TEST_F(HloEvaluatorTest, CopyStartCopyDone) {
   )";
   TF_ASSERT_OK_AND_ASSIGN(m_, ParseAndReturnVerifiedModule(hlo_text));
   Literal expected = LiteralUtil::CreateR0<float>(42.0f);
+  TF_ASSERT_OK_AND_ASSIGN(
+      Literal result, HloEvaluator().Evaluate(*m_->entry_computation(), {}));
+  EXPECT_TRUE(LiteralTestUtil::Equal(expected, result));
+}
+
+TEST_F(HloEvaluatorTest, CopyDifferentTypes) {
+  const absl::string_view hlo_text = R"(
+  HloModule test
+
+  ENTRY CopyDifferentTypes {
+    c = bf16[3] constant({1, 2, 3})
+    ROOT copy = f32[3] copy(bf16[3] c)
+  }
+  )";
+  TF_ASSERT_OK_AND_ASSIGN(m_, ParseAndReturnVerifiedModule(hlo_text));
+  Literal expected = LiteralUtil::CreateR1<float>({1.f, 2.f, 3.f});
   TF_ASSERT_OK_AND_ASSIGN(
       Literal result, HloEvaluator().Evaluate(*m_->entry_computation(), {}));
   EXPECT_TRUE(LiteralTestUtil::Equal(expected, result));
