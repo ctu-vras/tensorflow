@@ -15,18 +15,28 @@ limitations under the License.
 
 #include "xla/service/hlo_module_util.h"
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <utility>
 #include <vector>
 
+#include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
+#include "xla/debug_options_flags.h"
+#include "xla/hlo/ir/hlo_module.h"
 #include "xla/service/compiler.h"
+#include "xla/service/computation_layout.h"
+#include "xla/service/computation_placer.h"
 #include "xla/service/hlo_module_config.h"
 #include "xla/shape.h"
+#include "xla/shape_layout.h"
 #include "xla/shape_util.h"
+#include "xla/util.h"
+#include "tsl/platform/errors.h"
+#include "tsl/platform/statusor.h"
 
 namespace xla {
 
@@ -166,11 +176,12 @@ void UpdateEntryComputationLayout(
     ShapeUtil::ForEachMutableSubshape(
         shape, [&shape_representation_fn, empty_tiles_only](
                    Shape* subshape, const ShapeIndex& index) {
-          if (subshape->IsArray() && subshape->has_layout()) {
-            if (!empty_tiles_only ||
-                (empty_tiles_only && subshape->layout().tiles().empty())) {
-              *subshape = shape_representation_fn(*subshape);
-            }
+          if (!subshape->IsArray()) {
+            return;
+          }
+          if (!empty_tiles_only ||
+              (subshape->has_layout() && subshape->layout().tiles().empty())) {
+            *subshape = shape_representation_fn(*subshape);
           }
         });
   };
