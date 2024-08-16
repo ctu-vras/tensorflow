@@ -19,15 +19,35 @@ limitations under the License.
 #ifndef TENSORFLOW_LITE_OPTIONAL_DEBUG_TOOLS_H_
 #define TENSORFLOW_LITE_OPTIONAL_DEBUG_TOOLS_H_
 
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
 #include "tensorflow/lite/core/interpreter.h"
+#include "tensorflow/lite/core/subgraph.h"
 
 namespace tflite {
+// Returns the name of the allocation type.
+const char* AllocTypeName(TfLiteAllocationType type);
 
 // Prints a dump of what tensors and what nodes are in the interpreter.
 void PrintInterpreterState(const impl::Interpreter* interpreter,
                            int32_t tensor_name_display_length = 25,
                            int32_t tensor_type_display_length = 15,
                            int32_t alloc_type_display_length = 18);
+
+struct SubgraphDelegationMetadata {
+  // A bit vector indicating whether a node is replaced by a delegate.
+  std::vector<bool> replaced_node_bits;
+  // A vector mapping from the node id of a replaced node to the node id of
+  // the delegate node that replaced it.
+  std::vector<size_t> replaced_by_node;
+  // Whether any delegate has been applied to the subgraph.
+  bool has_delegate_applied = false;
+};
+
+// Returns the metadata of the delegation of the subgraph.
+SubgraphDelegationMetadata GetNodeDelegationMetadata(const Subgraph& subgraph);
 
 }  // namespace tflite
 
