@@ -89,8 +89,8 @@ def : Pat<(MHLO_NotOp TensorOf<[UI32]>:$input),
 
 foreach pair = [
   [MHLO_AndOp, TFL_LogicalAndOp],
-  [MHLO_OrOp, TFL_LogicalOrOp]]
-in {
+  [MHLO_OrOp, TFL_LogicalOrOp],
+] in {
   def : Pat<
     (pair[0] TFL_BoolTensor:$l, TFL_BoolTensor:$r),
     (pair[1] $l, $r)>;
@@ -122,11 +122,23 @@ def : Pat<
 foreach pair = [
   [MHLO_MaxOp, TFL_MaximumOp],
   [MHLO_MinOp, TFL_MinimumOp],
+  [MHLO_PowOp, TFL_PowOp],
+  [MHLO_Atan2Op, TFL_Atan2Op],
 ] in {
   def : Pat<
     (pair[0] $l, $r),
     (pair[1] $l, $r)>;
 }
+
+// Binary ops with fused activiation attr.
+foreach pair = [
+  [MHLO_MulOp, TFL_MulOp],
+] in {
+  def : Pat<
+    (pair[0] $l, $r),
+    (pair[1] $l, $r, TFL_AF_None)>;
+}
+
 
 
 //===----------------------------------------------------------------------===//
