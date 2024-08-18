@@ -184,6 +184,10 @@ REGISTER_OP("UncompressElement")
     .Attr("output_shapes: list(shape) >= 1")
     .SetShapeFn(shape_inference::DatasetIteratorShape);
 
+REGISTER_OP("CheckPinned")
+    .Input("element: input_types")
+    .Attr("input_types: list(type) >= 1");
+
 REGISTER_OP("ComputeBatchSize")
     .Input("input_dataset : variant")
     .Output("batch_size : int64")
