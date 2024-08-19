@@ -89,6 +89,7 @@ def lit_test_suite(
     tools = tools or []
     default_tags = default_tags or []
     tags_override = tags_override or {}
+    tags = kwargs.pop("tags", [])
 
     tests = []
     for test_file in srcs:
@@ -107,7 +108,7 @@ def lit_test_suite(
             visibility = visibility,
             env = env,
             timeout = timeout,
-            tags = default_tags + tags_override.get(test_file, []),
+            tags = tags + default_tags + tags_override.get(test_file, []),
             hermetic_cuda_data_dir = hermetic_cuda_data_dir,
             **kwargs
         )
@@ -115,6 +116,7 @@ def lit_test_suite(
     native.test_suite(
         name = name,
         tests = tests,
+        tags = tags,
         **kwargs
     )
 

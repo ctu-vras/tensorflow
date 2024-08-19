@@ -1183,7 +1183,6 @@ CONVOLUTION_TEST_DEPS = [
     "//xla/client:local_client",
     "//xla/client:padding",
     "//xla/client:xla_builder",
-    "//xla/service/gpu:gpu_executable",
     "//xla/tests:client_library_test_base",
     "//xla/tests:hlo_test_base",
     "//xla/tests:literal_test_util",

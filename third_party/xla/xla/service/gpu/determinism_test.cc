@@ -16,6 +16,7 @@ limitations under the License.
 #include <memory>
 #include <optional>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -79,6 +80,43 @@ class DeterminismTest : public GpuCodegenTest {
   DebugOptions GetDebugOptionsForTest() override { return debug_options_; }
 
   DebugOptions debug_options_;
+
+  bool isRocm() {
+    return std::holds_alternative<stream_executor::RocmComputeCapability>(
+        backend()
+            .default_stream_executor()
+            ->GetDeviceDescription()
+            .gpu_compute_capability());
+  }
+
+  bool isCuda() {
+    return std::holds_alternative<stream_executor::CudaComputeCapability>(
+        backend()
+            .default_stream_executor()
+            ->GetDeviceDescription()
+            .gpu_compute_capability());
+  }
+
+  bool isVoltaOrLater() {
+    const stream_executor::CudaComputeCapability* cuda_cc =
+        std::get_if<stream_executor::CudaComputeCapability>(
+            &backend()
+                 .default_stream_executor()
+                 ->GetDeviceDescription()
+                 .gpu_compute_capability());
+    return cuda_cc && cuda_cc->IsAtLeast(se::CudaComputeCapability::VOLTA);
+  }
+
+  bool HasHipblaslt() {
+    const stream_executor::RocmComputeCapability* rocm_cc =
+        std::get_if<stream_executor::RocmComputeCapability>(
+            &backend()
+                 .default_stream_executor()
+                 ->GetDeviceDescription()
+                 .gpu_compute_capability());
+
+    return rocm_cc && rocm_cc->has_hipblaslt();
+  }
 };
 
 TEST_F(DeterminismTest, CublasDot) {
@@ -89,16 +127,10 @@ ENTRY e {
   ROOT d = f32[128,128] dot(p0, p1), lhs_contracting_dims={1}, rhs_contracting_dims={0}
 })";
 
-#if TENSORFLOW_USE_ROCM
-  auto rocm = backend()
-                  .default_stream_executor()
-                  ->GetDeviceDescription()
-                  .rocm_compute_capability();
-  if (!rocm.has_hipblaslt()) {
+  if (isRocm() && !HasHipblaslt()) {
     GTEST_SKIP() << "No hipblas-lt support on this architecture!";
   }
   debug_options_.set_xla_gpu_enable_triton_gemm(false);
-#endif  // TENSORFLOW_USE_ROCM
 
   debug_options_.set_xla_gpu_triton_fusion_level(0);
   MatchOptimizedHlo(kHloText, R"(; CHECK: custom_call_target="__cublas$gemm")");
@@ -111,17 +143,9 @@ ENTRY e {
 }
 
 TEST_F(DeterminismTest, DeterministicTritonGemmUsesDefaultConfig) {
-#if GOOGLE_CUDA
-  auto comp = backend()
-                  .default_stream_executor()
-                  ->GetDeviceDescription()
-                  .cuda_compute_capability();
-  if (!comp.IsAtLeast(se::CudaComputeCapability::VOLTA)) {
+  if (!isVoltaOrLater()) {
     GTEST_SKIP() << "Triton not used on pre-Volta GPUs";
   }
-#elif TENSORFLOW_USE_ROCM
-  GTEST_SKIP() << "Triton Gemm rewriter is not yet supported on ROCM";
-#endif  // TENSORFLOW_USE_ROCM
 
   constexpr absl::string_view kHloText = R"(
 ENTRY e {
@@ -143,17 +167,9 @@ ENTRY e {
 }
 
 TEST_F(DeterminismTest, ExcludingNonDeterministicOpsDoesNotDisableAutotuning) {
-#if GOOGLE_CUDA
-  auto comp = backend()
-                  .default_stream_executor()
-                  ->GetDeviceDescription()
-                  .cuda_compute_capability();
-  if (!comp.IsAtLeast(se::CudaComputeCapability::VOLTA)) {
+  if (!isVoltaOrLater()) {
     GTEST_SKIP() << "Triton not used on pre-Volta GPUs";
   }
-#elif TENSORFLOW_USE_ROCM
-  GTEST_SKIP() << "Triton Gemm rewriter is not yet supported on ROCM";
-#endif  // TENSORFLOW_USE_ROCM
 
   debug_options_.set_xla_gpu_cublas_fallback(false);
   ASSERT_TRUE(debug_options_.xla_gpu_exclude_nondeterministic_ops());
