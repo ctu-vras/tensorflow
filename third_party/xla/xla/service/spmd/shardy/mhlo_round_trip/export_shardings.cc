@@ -56,6 +56,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "xla/array.h"
 #include "xla/hlo/ir/hlo_sharding.h"
 #include "xla/mlir_hlo/mhlo/IR/hlo_ops.h"
 #include "xla/service/spmd/shardy/constants.h"
@@ -235,9 +236,14 @@ HloSharding convertToHloSharding(
     ArrayRef<AxisRefAttr> manualAxes) {
   MeshAttr mesh = getMeshAttr(sdySharding);
 
-  // Convert to maximal sharding if the mesh only contains the device id.
-  if (std::optional<int64_t> deviceId = mesh.getDeviceId(); deviceId) {
-    return HloSharding::AssignDevice(*deviceId);
+  // Convert to replicated sharding if the mesh has no axes and no device ids.
+  if (mesh.getAxes().empty() && mesh.getDeviceIds().empty()) {
+    return HloSharding::Replicate();
+  }
+
+  // Convert to maximal sharding if the mesh has no axes and a device id.
+  if (mesh.getAxes().empty() && mesh.getDeviceIds().size() == 1) {
+    return HloSharding::AssignDevice(mesh.getDeviceIds().front());
   }
 
   SmallVector<int64_t> tileAssignmentDims(sdySharding.getRank(), 1);
@@ -290,6 +296,17 @@ HloSharding convertToHloSharding(
     tileAssignmentDims.push_back(totalReplicatedSize);
     types.push_back(OpSharding::REPLICATED);
   }
+
+  // Handle arbitrary device ID list.
+  if (!mesh.getDeviceIds().empty()) {
+    llvm::ArrayRef<int64_t> deviceIds = mesh.getDeviceIds();
+    Array<int64_t> deviceIdsArray(reshapeDims);
+    deviceIdsArray.SetValues(deviceIds);
+    deviceIdsArray.TransposeDimensions(transposePerm);
+    deviceIdsArray.Reshape(tileAssignmentDims);
+    return HloSharding::Tile(deviceIdsArray);
+  }
+
   return HloSharding::Subgroup(
       xla::TileAssignment(tileAssignmentDims, reshapeDims, transposePerm),
       types);
