@@ -412,6 +412,10 @@ class BufferIntervalTree {
   // inclusive.
   std::vector<int64_t> MemoryUsedInInterval(int64_t start, int64_t end) const;
 
+  // Returns an integer denoting the largest occupied memory location in the
+  // heap within the time interval [start, end].
+  int64_t HeapSizeInInterval(int64_t start, int64_t end) const;
+
  private:
   std::vector<const BufferIntervalTreeNode*> NodesOverlappingInTime(
       int64_t start, int64_t end) const;

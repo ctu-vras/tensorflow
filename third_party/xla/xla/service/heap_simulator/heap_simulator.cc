@@ -1028,6 +1028,18 @@ std::vector<int64_t> BufferIntervalTree::MemoryUsedInInterval(
   return memory_used_in_interval;
 }
 
+int64_t BufferIntervalTree::HeapSizeInInterval(int64_t start,
+                                               int64_t end) const {
+  CHECK_LE(start, end);
+  std::vector<const BufferIntervalTreeNode*> nodes =
+      NodesOverlappingInTime(start, end);
+  int64_t max_memory_used = 0;
+  for (const BufferIntervalTreeNode* node : nodes) {
+    max_memory_used = std::max(max_memory_used, node->chunk.chunk_end());
+  }
+  return max_memory_used;
+}
+
 template <typename BufferType>
 std::string
 GlobalDecreasingSizeBestFitHeap<BufferType>::BufferInterval::ToString() const {
