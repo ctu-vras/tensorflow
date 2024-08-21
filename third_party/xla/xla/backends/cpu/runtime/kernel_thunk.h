@@ -100,10 +100,8 @@ class KernelThunk : public Thunk {
               std::string kernel_name, se::ThreadDim thread_dim,
               std::optional<uint64_t> min_alignment);
 
-  absl::Status CheckInvariantBufferSlices() const;
-
-  absl::Status CheckInvariantBuffersMemory(
-      const BufferAllocations& buffer_allocations) const;
+  absl::Status CheckInvariantBuffersMemory(const BufferAllocations& allocations,
+                                           const KernelArgs& kernel_args) const;
 
   ArgumentsBuffers arguments_buffers_;
   ResultsBuffers results_buffers_;

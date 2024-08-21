@@ -200,10 +200,10 @@ KernelThunk<num_arguments, num_results>::ExecuteInternal(
   // Сheck that all resolved buffers are properly aligned, and that invariant
   // property holds.
   if constexpr (ShouldCheckBufferSlices()) {
+    // TODO(abanas): Check also for overlapping buffers.
     TF_RETURN_IF_ERROR(
         CheckBufferAlignment(info(), min_alignment_.value_or(0), kernel_args));
-    TF_RETURN_IF_ERROR(CheckInvariantBufferSlices());
-    TF_RETURN_IF_ERROR(CheckInvariantBuffersMemory(*allocations));
+    TF_RETURN_IF_ERROR(CheckInvariantBuffersMemory(*allocations, kernel_args));
   }
 
   // TODO(ezhulenev): Kernel ptr should be loaded as a part of Thunk
@@ -243,51 +243,6 @@ KernelThunk<num_arguments, num_results>::ExecuteInternal(
   return OkExecuteEvent();
 }
 
-template <int64_t num_arguments, int64_t num_results>
-absl::Status
-KernelThunk<num_arguments, num_results>::CheckInvariantBufferSlices() const {
-  // We can use absl::c_contains here when we have C++20 support.
-  // TODO(abanas): Check for overlapping buffers.
-  auto contains = [](const auto& container,
-                     const BufferAllocation::Slice& buffer) {
-    return absl::c_find(container, buffer) != container.end();
-  };
-
-  // Verify all argument buffers.
-  for (const BufferAllocation::Slice& buffer : arguments_buffers_) {
-    if (invariant_buffers_.contains(buffer)) {
-      // This argument should be read only, i.e. not one of the results.
-      if (contains(results_buffers_, buffer)) {
-        return Internal(
-            "Mismatch in invariant buffers metadata, invariant buffer %s "
-            "should not be one of the results",
-            buffer.ToString());
-      }
-    } else {
-      // For completeness, we check that a read write buffer is one of the
-      // results.
-      if (!contains(results_buffers_, buffer)) {
-        return Internal(
-            "Mismatch in invariant buffers metadata, read-write buffer %s "
-            "is not one of the results",
-            buffer.ToString());
-      }
-    }
-  }
-
-  // Verify that there are no extra buffers in invariant buffers set.
-  for (auto& buffer : invariant_buffers_) {
-    if (!contains(arguments_buffers_, buffer)) {
-      return Internal(
-          "Mismatch in invariant buffers metadata, unknown buffer found: %s",
-          buffer.ToString());
-    }
-  }
-  return absl::OkStatus();
-}
-
-// TODO(abanas): Return absl::flat_hash_set. This requires implementing a hash
-// function for DeviceMemoryBase.
 template <typename Iterable>
 static absl::StatusOr<absl::InlinedVector<se::DeviceMemoryBase, 8>>
 ToDeviceMemorySet(const Iterable& buffers,
@@ -301,44 +256,63 @@ ToDeviceMemorySet(const Iterable& buffers,
   return result;
 }
 
-// The logic here is similar to CheckInvariantBufferSlices, but we check
-// memory addresses instead of buffer slices.
+static bool IsEqual(const se::DeviceMemoryBase& a, const SE_HOST_KernelArg& b) {
+  return a.opaque() == b.data && a.size() && b.size;
+}
+
+static bool IsEqual(const SE_HOST_KernelArg& a, const se::DeviceMemoryBase& b) {
+  return IsEqual(b, a);
+}
+
+static bool IsEqual(const SE_HOST_KernelArg& a, const SE_HOST_KernelArg& b) {
+  return a.data == b.data && a.size == b.size;
+}
+
+template <typename T1, typename T2>
+static bool Contains(absl::Span<const T1> container, const T2& memory) {
+  return absl::c_any_of(
+      container, [&](const T1& element) { return IsEqual(element, memory); });
+}
+
 template <int64_t num_arguments, int64_t num_results>
 absl::Status
 KernelThunk<num_arguments, num_results>::CheckInvariantBuffersMemory(
-    const BufferAllocations& allocations) const {
-  // We can use absl::c_contains here when we have C++20 support.
-  auto contains = [](absl::Span<const se::DeviceMemoryBase> container,
-                     const se::DeviceMemoryBase& memory) {
-    return absl::c_find(container, memory) != container.end();
-  };
-
-  TF_ASSIGN_OR_RETURN(auto results_memory_set,
-                      ToDeviceMemorySet(results_buffers_, allocations));
+    const BufferAllocations& allocations, const KernelArgs& kernel_args) const {
+  // TODO(abanas): We may want to use indexes instead of slices for
+  // invariant_buffers_ as a next step to improve performance.
   TF_ASSIGN_OR_RETURN(auto invariant_memory_set,
                       ToDeviceMemorySet(invariant_buffers_, allocations));
 
+  auto arguments = absl::Span<const SE_HOST_KernelArg>(
+      kernel_args.data(), arguments_buffers_.size());
+  auto results = absl::Span<const SE_HOST_KernelArg>(
+      kernel_args.data() + arguments_buffers_.size(), results_buffers_.size());
+
+  auto is_invariant = [&](const SE_HOST_KernelArg& memory) {
+    return Contains<se::DeviceMemoryBase, SE_HOST_KernelArg>(
+        invariant_memory_set, memory);
+  };
+
   // Verify all argument buffers.
-  for (const BufferAllocation::Slice& argument_slice : arguments_buffers_) {
-    TF_ASSIGN_OR_RETURN(auto argument_memory,
-                        allocations.GetDeviceAddress(argument_slice));
-    if (contains(invariant_memory_set, argument_memory)) {
+  for (const SE_HOST_KernelArg& argument : arguments) {
+    if (is_invariant(argument)) {
       // This argument should be read only, i.e. not one of the results.
-      if (contains(results_memory_set, argument_memory)) {
-        return Internal(
-            "Mismatch in invariant buffers metadata, device memory of "
-            "invariant buffer %s should not be one of the results",
-            argument_slice.ToString());
+      if (Contains(results, argument)) {
+        return Internal("Mismatch in invariant buffers metadata");
       }
     } else {
       // For completeness, we check that a read write buffer is one of the
       // results.
-      if (!contains(results_memory_set, argument_memory)) {
-        return Internal(
-            "Mismatch in invariant buffers metadata, device memory of "
-            "read-write buffer %s is not one of the results",
-            argument_slice.ToString());
+      if (!Contains(results, argument)) {
+        return Internal("Mismatch in invariant buffers metadata");
       }
+    }
+  }
+
+  // Verify that there are no extra buffers in invariant buffers set.
+  for (auto& buffer : invariant_memory_set) {
+    if (!Contains(arguments, buffer)) {
+      return Internal("Mismatch in invariant buffers metadata");
     }
   }
 
