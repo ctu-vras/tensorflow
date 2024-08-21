@@ -2304,7 +2304,17 @@ func.func @dynamic_update_slice_operand_has_dynamic_dim(%arg0: tensor<1x?x256xf3
 // rounding
 //===----------------------------------------------------------------------===//
 
-// CHECK-LABEL: round
+// CHECK-LABEL: @nearest_even
+func.func @nearest_even(%arg0: tensor<2xf32>) -> tensor<2xf32> {
+  %0 = "mhlo.round_nearest_even"(%arg0) : (tensor<2xf32>) -> tensor<2xf32>
+  return %0 : tensor<2xf32>
+}
+
+// CHECK: %0 = "tfl.round"(%arg0) : (tensor<2xf32>) -> tensor<2xf32>
+
+// -----
+
+// CHECK-LABEL: @round
 func.func @round(%arg0: tensor<8x128xf32>) -> tensor<8x128xf32> {
   %0 = mhlo.constant dense<2.000000e+00> : tensor<8x128xf32>
   %1 = mhlo.constant dense<5.000000e-01> : tensor<8x128xf32>
@@ -2496,7 +2506,7 @@ func.func @floor_div_broadcast_cst(%arg0: tensor<10x8xf32>) -> tensor<10x8xf32> 
   func.return %15 : tensor<10x8xf32>
 }
 
-// CHECK: %[[BCAST:.*]] = "mhlo.broadcast_in_dim"(%1)
+// CHECK: %[[BCAST:.*]] = "tfl.broadcast_to"
 // CHECK: tfl.floor_div %arg0, %[[BCAST]] : tensor<10x8xf32>
 
 // -----
@@ -3183,7 +3193,7 @@ func.func @while_with_reduce(%arg0: tensor<1x256xf32>, %arg1: tensor<1xf32>) -> 
 // CHECK:     ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>, %arg4: tensor<i32>, %arg5: tensor<1x256xf32>, %arg6: tensor<1xf32>):
 // CHECK:     %1 = tfl.less(%arg2, %arg4) : (tensor<i32>, tensor<i32>) -> tensor<i1>
 // CHECK:     "tfl.yield"(%1) : (tensor<i1>) -> ()
- // CHECK:    }, {
+// CHECK:     }, {
 // CHECK:     ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>, %arg4: tensor<i32>, %arg5: tensor<1x256xf32>, %arg6: tensor<1xf32>):
 // CHECK:     %1 = mhlo.add %arg2, %arg3 : tensor<i32>
 // CHECK:     %2 = mhlo.constant dense<0.000000e+00> : tensor<f32>
@@ -3196,9 +3206,8 @@ func.func @while_with_reduce(%arg0: tensor<1x256xf32>, %arg1: tensor<1xf32>) -> 
 
 // -----
 
-
 //===----------------------------------------------------------------------===//
-// mhlo.get_dimension_size
+// data movement and shaping
 //===----------------------------------------------------------------------===//
 
 // CHECK-LABEL: func @get_dimension_size(
@@ -3207,9 +3216,82 @@ func.func @get_dimension_size(%arg0: tensor<4x256x?xf32>) -> tensor<i32> {
   func.return %0 : tensor<i32>
 }
 
-// CHECK: %0  = "tfl.shape"(%arg0) : (tensor<4x256x?xf32>) -> tensor<3xi64>
+// CHECK:     %0 = "tfl.shape"(%arg0) : (tensor<4x256x?xf32>) -> tensor<3xi64>
 // CHECK-DAG: %cst = arith.constant dense<1> : tensor<1xi64>
 // CHECK-DAG: %cst_0 = arith.constant dense<1> : tensor<1xi64>
 // CHECK:     %1 = "tfl.slice"(%0, %cst_0, %cst) : (tensor<3xi64>, tensor<1xi64>, tensor<1xi64>) -> tensor<1xi64>
-// CHECK:     %2 = "tfl.squeeze"(%1) <{squeeze_dims = [0]}> : (tensor<1xi64>) -> tensor<i32>
-// CHECK:     return %2 : tensor<i32>
+// CHECK:     %2 = "tfl.cast"(%1) : (tensor<1xi64>) -> tensor<1xi32>
+// CHECK:     %3 = "tfl.squeeze"(%2) <{squeeze_dims = [0]}> : (tensor<1xi32>) -> tensor<i32>
+// CHECK:     return %3 : tensor<i32>
+
+// -----
+
+// CHECK-LABEL: reverse
+func.func @reverse(%arg0: tensor<3x2xi32>) -> tensor<3x2xi32> {
+  %0 = "mhlo.reverse"(%arg0) <{dimensions = dense<0> : tensor<1xi64>}> : (tensor<3x2xi32>) -> tensor<3x2xi32>
+  func.return %0 : tensor<3x2xi32>
+}
+
+// CHECK: %cst = arith.constant dense<0> : tensor<1xi64>
+// CHECK: %0 = "tfl.cast"(%cst) : (tensor<1xi64>) -> tensor<1xi32>
+// CHECK: %1 = "tfl.reverse_v2"(%arg0, %0) : (tensor<3x2xi32>, tensor<1xi32>) -> tensor<3x2xi32>
+// CHECK: return %1 : tensor<3x2xi32>
+
+// -----
+
+// CHECK-LABEL: concat
+func.func @concat(%arg0: tensor<3x3xf32>, %arg1: tensor<3x3xf32>) -> tensor<6x3xf32> {
+  %0 = "mhlo.concatenate"(%arg0, %arg1) <{dimension = 0 : i64}> : (tensor<3x3xf32>, tensor<3x3xf32>) -> tensor<6x3xf32>
+  func.return %0 : tensor<6x3xf32>
+}
+
+// CHECK: %0 = "tfl.concatenation"(%arg0, %arg1) <{axis = 0 : i32, fused_activation_function = "NONE"}> : (tensor<3x3xf32>, tensor<3x3xf32>) -> tensor<6x3xf32>
+
+// -----
+
+// CHECK-LABEL: broadcast_in_dim_tfl_style
+func.func @broadcast_in_dim_tfl_style(%arg0: tensor<8x1x16xf32>) -> tensor<3x8x8x16xf32> {
+  %0 = "mhlo.broadcast_in_dim"(%arg0) <{broadcast_dimensions = dense<[1, 2, 3]> : tensor<3xi64>, name = "broadcast.0"}> : (tensor<8x1x16xf32>) -> tensor<3x8x8x16xf32>
+  func.return %0 : tensor<3x8x8x16xf32>
+}
+
+// CHECK: %cst = arith.constant dense<[3, 8, 8, 16]> : tensor<4xi64>
+// CHECK: %0 = "tfl.broadcast_to"(%arg0, %cst) : (tensor<8x1x16xf32>, tensor<4xi64>) -> tensor<3x8x8x16xf32>
+
+// -----
+
+// CHECK-LABEL: broadcast_in_dim_general_case
+func.func @broadcast_in_dim_general_case(%arg0: tensor<3x1x16xf32>) -> tensor<3x8x8x16xf32> {
+  %0 = "mhlo.broadcast_in_dim"(%arg0) <{broadcast_dimensions = dense<[0, 2, 3]> : tensor<3xi64>, name = "broadcast.0"}> : (tensor<3x1x16xf32>) -> tensor<3x8x8x16xf32>
+  func.return %0 : tensor<3x8x8x16xf32>
+}
+
+// CHECK: %cst = arith.constant dense<[3, 1, 1, 16]> : tensor<4xi32>
+// CHECK: %0 = "tfl.reshape"(%arg0, %cst) : (tensor<3x1x16xf32>, tensor<4xi32>) -> tensor<3x1x1x16xf32>
+// CHECK: %cst_0 = arith.constant dense<[3, 8, 8, 16]> : tensor<4xi64>
+// CHECK: %1 = "tfl.broadcast_to"(%0, %cst_0) : (tensor<3x1x1x16xf32>, tensor<4xi64>) -> tensor<3x8x8x16xf32>
+
+// -----
+
+// CHECK-LABEL: dynamic_broadcast_in_dim_tf_style
+func.func @dynamic_broadcast_in_dim_tf_style(%arg0: tensor<?x1x1x2x1xf32>, %arg1: tensor<5xi32>) -> tensor<?x750x1x2x384xf32> {
+  %0 = "mhlo.dynamic_broadcast_in_dim"(%arg0, %arg1) <{broadcast_dimensions = dense<[0, 1, 2, 3, 4]> : tensor<5xi64>}> : (tensor<?x1x1x2x1xf32>, tensor<5xi32>) -> tensor<?x750x1x2x384xf32>
+  func.return %0 : tensor<?x750x1x2x384xf32>
+}
+
+// CHECK: %0 = "tfl.broadcast_to"(%arg0, %arg1) : (tensor<?x1x1x2x1xf32>, tensor<5xi32>) -> tensor<?x750x1x2x384xf32>
+
+// -----
+
+// CHECK-LABEL: dynamic_broadcast_in_dim_general_case_expand_back_dims
+func.func @dynamic_broadcast_in_dim_general_case_expand_back_dims(%arg0: tensor<?x3000xf32>, %arg1: tensor<4xi32>) -> tensor<?x3000x2x4xf32> {
+  %0 = "mhlo.dynamic_broadcast_in_dim"(%arg0, %arg1) <{broadcast_dimensions = dense<[0, 1]> : tensor<2xi64>}> : (tensor<?x3000xf32>, tensor<4xi32>) -> tensor<?x3000x2x4xf32>
+  func.return %0 : tensor<?x3000x2x4xf32>
+}
+
+// CHECK: %cst = arith.constant dense<2> : tensor<i64>
+// CHECK: %0 = "tfl.expand_dims"(%arg0, %cst) : (tensor<?x3000xf32>, tensor<i64>) -> tensor<?x3000x1xf32>
+// CHECK: %cst_0 = arith.constant dense<3> : tensor<i64>
+// CHECK: %1 = "tfl.expand_dims"(%0, %cst_0) : (tensor<?x3000x1xf32>, tensor<i64>) -> tensor<?x3000x1x1xf32>
+// CHECK: %2 = "tfl.broadcast_to"(%1, %arg1) : (tensor<?x3000x1x1xf32>, tensor<4xi32>) -> tensor<?x3000x2x4xf32>
+
