@@ -29,16 +29,74 @@ def ShapeToConst : NativeCodeCall<"ShapeToConst($_builder, $0)">;
 def CreateTFLCastToInt32Op : NativeCodeCall<
   "CreateCastToInt32($0, $_loc, $_builder)">;
 
-def LegalizeTranspose : Pat<(MHLO_TransposeOp $arg, $perm),
-                            (TFL_TransposeOp $arg,
-                            (CreateTFLCastToInt32Op (TFL_ConstOp $perm)))>;
+//===----------------------------------------------------------------------===//
+// data movement
+//===----------------------------------------------------------------------===//
 
-def LegalizeReshape : Pat<(MHLO_ReshapeOp:$output $input),
-          (TFL_ReshapeOp $input,
-            (CreateTFLCastToInt32Op (ShapeToConst $output)))>;
+def : Pat<
+  (MHLO_TransposeOp $arg, $perm),
+  (TFL_TransposeOp $arg,
+    (CreateTFLCastToInt32Op 
+      (TFL_ConstOp $perm)))>;
 
-def LegalizeDynamicReshape : Pat<(MHLO_DynamicReshapeOp $input, $shape),
-          (TFL_ReshapeOp $input, (CreateTFLCastToInt32Op $shape))>;
+def : Pat<
+  (MHLO_ReverseOp $input, $dims),
+  (TFL_ReverseV2Op $input,
+    (CreateTFLCastToInt32Op
+      (Arith_ConstantOp $dims)))>;
+
+//
+// Reshapes
+//
+
+def : Pat<
+  (MHLO_ReshapeOp:$output $input),
+  (TFL_ReshapeOp $input,
+    (CreateTFLCastToInt32Op
+      (ShapeToConst $output)))>;
+
+def : Pat<
+  (MHLO_DynamicReshapeOp $input, $shape),
+  (TFL_ReshapeOp $input,
+    (CreateTFLCastToInt32Op $shape))>;
+
+//
+// Broadcasts
+//
+
+def IsTFLStyleBroadcast :
+  Constraint<CPred<"IsTFLStyleBroadcast($0, $1)">>;
+
+def IsNotTFLStyleBroadcast : 
+  Constraint<Neg<IsTFLStyleBroadcast.predicate>>;
+
+def ExpandedShape : 
+  NativeCodeCall<"ExpandedShape($_builder, $0, $1, $2)">;
+
+def : Pat<
+  (MHLO_BroadcastInDimOp:$output 
+    $input,
+    $broadcast_dimensions),
+  (TFL_BroadcastToOp 
+    $input,
+    (ShapeToConst $output)),
+  [(IsTFLStyleBroadcast $broadcast_dimensions, $output)]>;
+
+def : Pat<
+  (MHLO_BroadcastInDimOp:$output
+    $input,
+    $broadcast_dimensions),
+  (TFL_BroadcastToOp
+    (TFL_ReshapeOp
+        $input,
+        (ExpandedShape
+          $input,
+          $broadcast_dimensions,
+          $output)),
+    (ShapeToConst $output)),
+  [(IsNotTFLStyleBroadcast $broadcast_dimensions, $output)]>;
+
+
 
 //===----------------------------------------------------------------------===//
 // logical and bitwise ops
