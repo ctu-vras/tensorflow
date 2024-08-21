@@ -62,7 +62,7 @@ class ExhaustiveF64UnaryTest : public ExhaustiveUnaryTest<F64>,
     uint64_t i = 0;
     absl::Span<double> input_arr = (*input_literal)[0].data<double>();
     for (auto bits : fp_values) {
-      input_arr[i] = this->ConvertAndReplaceKnownIncorrectValueWith(bits, 1);
+      input_arr[i] = this->ConvertValue(bits);
       ++i;
     }
     CHECK_EQ(i, input_size);
@@ -113,7 +113,7 @@ UNARY_TEST_FLOAT_64(Tanh, {
   if (platform_ == "CUDA") {
     error_spec_gen = +[](NativeT x) {
       return x <= static_cast<NativeT>(-20.0) || x >= static_cast<NativeT>(20.0)
-                 ? ErrorSpec{0, 0}
+                 ? ErrorSpec::Builder().abs_err(0).rel_err(0).build()
                  : GetDefaultSpecGenerator()(x);
     };
   }
@@ -129,11 +129,15 @@ UNARY_TEST_FLOAT_64(Tan, { Run(Tan, std::tan); })
 UNARY_TEST_FLOAT_64(Round, { Run(Round, std::round); })
 
 UNARY_TEST_FLOAT_64(Erf, {
-  Run(Erf, std::erf, [](NativeT x) { return ErrorSpec{1e-20, 1e-20}; });
+  Run(Erf, std::erf, [](NativeT x) {
+    return ErrorSpec::Builder().abs_err(1e-20).rel_err(1e-20).build();
+  });
 })
 
 UNARY_TEST_FLOAT_64(Erfc, {
-  Run(Erfc, std::erfc, [](NativeT x) { return ErrorSpec{1e-20, 1e-20}; });
+  Run(Erfc, std::erfc, [](NativeT x) {
+    return ErrorSpec::Builder().abs_err(1e-20).rel_err(1e-20).build();
+  });
 })
 
 INSTANTIATE_TEST_SUITE_P(
