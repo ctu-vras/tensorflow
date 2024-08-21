@@ -3183,7 +3183,7 @@ func.func @while_with_reduce(%arg0: tensor<1x256xf32>, %arg1: tensor<1xf32>) -> 
 // CHECK:     ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>, %arg4: tensor<i32>, %arg5: tensor<1x256xf32>, %arg6: tensor<1xf32>):
 // CHECK:     %1 = tfl.less(%arg2, %arg4) : (tensor<i32>, tensor<i32>) -> tensor<i1>
 // CHECK:     "tfl.yield"(%1) : (tensor<i1>) -> ()
- // CHECK:    }, {
+// CHECK:     }, {
 // CHECK:     ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>, %arg4: tensor<i32>, %arg5: tensor<1x256xf32>, %arg6: tensor<1xf32>):
 // CHECK:     %1 = mhlo.add %arg2, %arg3 : tensor<i32>
 // CHECK:     %2 = mhlo.constant dense<0.000000e+00> : tensor<f32>
@@ -3196,9 +3196,8 @@ func.func @while_with_reduce(%arg0: tensor<1x256xf32>, %arg1: tensor<1xf32>) -> 
 
 // -----
 
-
 //===----------------------------------------------------------------------===//
-// mhlo.get_dimension_size
+// data movement and shaping
 //===----------------------------------------------------------------------===//
 
 // CHECK-LABEL: func @get_dimension_size(
@@ -3207,9 +3206,24 @@ func.func @get_dimension_size(%arg0: tensor<4x256x?xf32>) -> tensor<i32> {
   func.return %0 : tensor<i32>
 }
 
-// CHECK: %0  = "tfl.shape"(%arg0) : (tensor<4x256x?xf32>) -> tensor<3xi64>
+// CHECK:     %0 = "tfl.shape"(%arg0) : (tensor<4x256x?xf32>) -> tensor<3xi64>
 // CHECK-DAG: %cst = arith.constant dense<1> : tensor<1xi64>
 // CHECK-DAG: %cst_0 = arith.constant dense<1> : tensor<1xi64>
 // CHECK:     %1 = "tfl.slice"(%0, %cst_0, %cst) : (tensor<3xi64>, tensor<1xi64>, tensor<1xi64>) -> tensor<1xi64>
 // CHECK:     %2 = "tfl.squeeze"(%1) <{squeeze_dims = [0]}> : (tensor<1xi64>) -> tensor<i32>
 // CHECK:     return %2 : tensor<i32>
+
+// -----
+
+// CHECK-LABEL: reverse
+func.func @reverse(%arg0: tensor<3x2xi32>) -> tensor<3x2xi32> {
+  %0 = "mhlo.reverse"(%arg0) <{dimensions = dense<0> : tensor<1xi64>}> : (tensor<3x2xi32>) -> tensor<3x2xi32>
+  func.return %0 : tensor<3x2xi32>
+}
+
+// CHECK: %cst = arith.constant dense<0> : tensor<1xi64>
+// CHECK: %0 = "tfl.cast"(%cst) : (tensor<1xi64>) -> tensor<1xi32>
+// CHECK: %1 = "tfl.reverse_v2"(%arg0, %0) : (tensor<3x2xi32>, tensor<1xi32>) -> tensor<3x2xi32>
+// CHECK: return %1 : tensor<3x2xi32>
+
+// -----
