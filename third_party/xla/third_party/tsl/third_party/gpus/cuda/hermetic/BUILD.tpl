@@ -80,7 +80,7 @@ cc_library(
 
 alias(
   name = "cuda_driver",
-  actual = "@cuda_cudart//:cuda_driver",
+  actual = "@cuda_compat//:cuda_compat",
 )
 
 alias(

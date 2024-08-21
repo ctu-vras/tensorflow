@@ -42,6 +42,7 @@ third_party/gpus/cuda/cuda_config.py.tpl:
 third_party/gpus/cuda/hermetic/BUILD.tpl:
 third_party/gpus/cuda/hermetic/BUILD:
 third_party/gpus/cuda/hermetic/cuda_cccl.BUILD.tpl:
+third_party/gpus/cuda/hermetic/cuda_compat.BUILD.tpl:
 third_party/gpus/cuda/hermetic/cuda_configure.bzl:
 third_party/gpus/cuda/hermetic/cuda_cublas.BUILD.tpl:
 third_party/gpus/cuda/hermetic/cuda_cudart.BUILD.tpl:

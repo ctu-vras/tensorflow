@@ -27,6 +27,7 @@ cc_library(
         %{comment}"include/cupti_activity_deprecated.h",
         %{comment}"include/cupti_callbacks.h",
         %{comment}"include/cupti_checkpoint.h",
+        %{comment}"include/cupti_common.h",
         %{comment}"include/cupti_driver_cbid.h",
         %{comment}"include/cupti_events.h",
         %{comment}"include/cupti_metrics.h",
